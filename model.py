@@ -8,16 +8,21 @@ class HyperFace(object):
 	def __init__(self, sess):
 
 		self.sess = sess
-		self.batch_size = 128
+		self.batch_size = 2
 		self.img_height = 227
 		self.img_width = 227
 		self.channel = 3
 
+		self.num_epochs = 10
+
+		# Hyperparameters
 		self.weight_detect = 1
 		self.weight_landmarks = 5
 		self.weight_visibility = 0.5
 		self.weight_pose = 5
 		self.weight_gender = 2
+
+		self.build_network()
 
 
 	def build_network(self):
@@ -29,13 +34,13 @@ class HyperFace(object):
 		self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
 		self.gender = tf.placeholder(tf.float32, [self.batch_size,2], name='gender')
 
-
-
-		net_output = network(self.X) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
-
+		net_output = self.network(self.X) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
 
 		loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(net_output[0], self.detection))
-		loss_landmarks = tf.reduce_mean()
+		
+		visibility_mask = tf.reshape(tf.tile(tf.expand_dims(self.visibility, axis=2), [1,1,2]), [self.batch_size, -1])
+		loss_landmarks = tf.reduce_mean(tf.square(visibility_mask*(net_output[1] - self.landmarks)))
+		
 		loss_visibility = tf.reduce_mean(tf.square(net_output[2] - self.visibility))
 		loss_pose = tf.reduce_mean(tf.square(net_output[3] - self.pose))
 		loss_gender = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(net_output[4], self.gender))
@@ -46,35 +51,42 @@ class HyperFace(object):
 
 
 	def train(self):
-		self.writer = tf.train.SummaryWriter('./logs', self.sess.graph)
-		self.optimizer = tf.train.AdamOptimizer().minimize(self.loss)
+		
+		optimizer = tf.train.AdamOptimizer().minimize(self.loss)
+
+		writer = tf.summary.FileWriter('./logs', self.sess.graph)
+		loss_summ = tf.summary.scalar('loss', self.loss)
+
+
+
 
 
 	def network(self,inputs):
 
-		with slim.arg_scope([slim.conv2D, slim.fully_connected],
+		with slim.arg_scope([slim.conv2d, slim.fully_connected],
 							 activation_fn = tf.nn.relu,
-							 weight_initializer = tf.truncated_normal_initializer(0.0, 0.01) ):
+							 weights_initializer = tf.truncated_normal_initializer(0.0, 0.01) ):
 			
-			conv1 = slim.conv2D(inputs, 96, [11,11], 4, padding= 'VALID', scope='conv1')
-			max1 = slim.max_pool2D(conv1, [3,3], 2, padding= 'VALID', scope='max1')
+			conv1 = slim.conv2d(inputs, 96, [11,11], 4, padding= 'VALID', scope='conv1')
+			max1 = slim.max_pool2d(conv1, [3,3], 2, padding= 'VALID', scope='max1')
 
-			conv1a = slim.conv2D(max1, 256, [4,4], 4, padding= 'VALID', scope='conv1a')
+			conv1a = slim.conv2d(max1, 256, [4,4], 4, padding= 'VALID', scope='conv1a')
 
-			conv2 = slim.conv2D(max1, 256, [5,5], 1, scope='conv2')
-			max2 = slim.max_pool2D(conv2, [3,3], 2, padding= 'VALID', scope='max2')
-			conv3 = slim.conv2D(max2, 384, [3,3], 1, scope='conv3')
+			conv2 = slim.conv2d(max1, 256, [5,5], 1, scope='conv2')
+			max2 = slim.max_pool2d(conv2, [3,3], 2, padding= 'VALID', scope='max2')
+			conv3 = slim.conv2d(max2, 384, [3,3], 1, scope='conv3')
 
-			conv3a = slim.conv2D(conv3, 256, [2,2], 2, padding= 'VALID', scope='conv3a')
+			conv3a = slim.conv2d(conv3, 256, [2,2], 2, padding= 'VALID', scope='conv3a')
 
-			conv4 = slim.conv2D(conv3, 384, [3,3], 1, scope='conv4')
-			conv5 = slim.conv2D(conv4, 256, [3,3], 1, scope='conv5')
-			pool5 = slim.max_pool2D(conv5, [3,3], 2, padding= 'VALID', scope='pool5')
+			conv4 = slim.conv2d(conv3, 384, [3,3], 1, scope='conv4')
+			conv5 = slim.conv2d(conv4, 256, [3,3], 1, scope='conv5')
+			pool5 = slim.max_pool2d(conv5, [3,3], 2, padding= 'VALID', scope='pool5')
 
 			concat_feat = tf.concat(3, [conv1a, conv3a, pool5])
-
-			conv_all = slim.conv2D(concat_feat, 192, [1,1], 1, padding= 'VALID', scope='conv_all')
-			fc_full = slim.fully_connected(conv_all, 3072, scope='fc_full')
+			conv_all = slim.conv2d(concat_feat, 192, [1,1], 1, padding= 'VALID', scope='conv_all')
+			
+			shape = int(np.prod(conv_all.get_shape()[1:]))
+			fc_full = slim.fully_connected(tf.reshape(conv_all, [-1, shape]), 3072, scope='fc_full')
 
 			fc_detection = slim.fully_connected(fc_full, 512, scope='fc_detection')
 			fc_landmarks = slim.fully_connected(fc_full, 512, scope='fc_landmarks')
@@ -90,8 +102,11 @@ class HyperFace(object):
 
 		return [out_detection, out_landmarks, out_visibility, out_pose, out_gender]
 
-
-
+	def print_variables(self):
+		variables = slim.get_model_variables()
+		print 'Model Variables:'
+		for var in variables:
+			print var.name, ' ', var.get_shape()
 
 
 			
