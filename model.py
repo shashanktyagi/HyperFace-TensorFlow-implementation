@@ -5,7 +5,7 @@ import numpy as np
 
 class HyperFace(object):
 
-	def __init__(self, sess):
+	def __init__(self, sess,tf_record_file_path=None):
 
 		self.sess = sess
 		self.batch_size = 2
@@ -22,6 +22,13 @@ class HyperFace(object):
 		self.weight_pose = 5
 		self.weight_gender = 2
 
+		#tf_Record Paramters
+		self.filename_queue = tf.train.string_input_producer([tf_record_file_path], num_epochs=self.num_epochs)
+
+		#Spatial Transformer Input
+		self.sp_input_width = 500
+		self.sp_input_height = 500
+
 		self.build_network()
 
 
@@ -33,7 +40,9 @@ class HyperFace(object):
 		self.visibility = tf.placeholder(tf.float32, [self.batch_size,21], name='visibility')
 		self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
 		self.gender = tf.placeholder(tf.float32, [self.batch_size,2], name='gender')
-
+		
+		self.X = self.load_from_tfRecord(self.filename_queue)
+		
 		net_output = self.network(self.X) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
 
 		loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(net_output[0], self.detection))
@@ -56,10 +65,6 @@ class HyperFace(object):
 
 		writer = tf.summary.FileWriter('./logs', self.sess.graph)
 		loss_summ = tf.summary.scalar('loss', self.loss)
-
-
-
-
 
 	def network(self,inputs):
 
@@ -101,6 +106,32 @@ class HyperFace(object):
 			out_gender = slim.fully_connected(fc_gender, 2, scope='out_gender')
 
 		return [out_detection, out_landmarks, out_visibility, out_pose, out_gender]
+
+	def load_from_tfRecord(self,filename_queue):
+		
+		reader = tf.TFRecordReader()
+		_, serialized_example = reader.read(filename_queue)
+		
+		features = tf.parse_single_example(
+			serialized_example,
+			features={
+				'image_raw':tf.FixedLenFeature([], tf.string),
+				'width': tf.FixedLenFeature([], tf.int64),
+				'height': tf.FixedLenFeature([], tf.int64)
+			})
+		
+		image = tf.decode_raw(features['image_raw'], tf.float32)
+		orig_height = tf.cast(features['height'], tf.int32)
+		orig_width = tf.cast(features['width'], tf.int32)
+		
+		image_shape = tf.pack([orig_height,orig_width,3])
+		image_tf = tf.reshape(image,image_shape)
+
+		resized_image = tf.image.resize_image_with_crop_or_pad(image_tf,target_height=self.img_height,target_width=self.img_width)
+		
+		images = tf.train.shuffle_batch([resized_image],batch_size=self.batch_size,num_threads=1,capacity=50,min_after_dequeue=10)
+		
+		return images
 
 	def print_variables(self):
 		variables = slim.get_model_variables()
