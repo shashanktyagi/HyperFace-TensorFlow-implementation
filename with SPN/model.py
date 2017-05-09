@@ -11,10 +11,10 @@ class Network(object):
 
 		self.sess = sess
 		self.batch_size = 2
-		self.img_height = 227
-		self.img_width = 227
-		self.out_height = 200
-		self.out_width = 200
+		self.img_height = 500
+		self.img_width = 500
+		self.out_height = 227
+		self.out_width = 227
 		self.channel = 3
 
 		self.num_epochs = 10
@@ -39,13 +39,13 @@ class Network(object):
 		self.gender = tf.placeholder(tf.float32, [self.batch_size,2], name='gender')
 
 
-		theta = self.localization_network(self.X)
+		theta = self.localization_squeezenet(self.X)
 
-		T_mat = self.get_transformation_matrix(theta)
-		
-		cropped = transformer(self.X, T_mat, [self.out_height, self.out_width])
+		self.T_mat = tf.reshape(theta, [-1, 2,3])
 
-		net_output = self.hyperface(cropped) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
+		self.cropped = transformer(self.X, self.T_mat, [self.out_height, self.out_width])
+
+		net_output = self.hyperface(self.cropped) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
 
 
 		loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(net_output[0], self.detection))
@@ -80,7 +80,9 @@ class Network(object):
 
 		writer = tf.summary.FileWriter('./logs', self.sess.graph)
 		loss_summ = tf.summary.scalar('loss', self.loss)
+		img_summ = tf.summary.image('cropped_image', self.cropped)
 
+		print self.sess.run(self.T_mat, feed_dict={self.X: np.random.randn(self.batch_size, self.img_height, self.img_width, self.channel)})
 
 
 
@@ -131,7 +133,7 @@ class Network(object):
 
 
 
-	def localization_network(self,inputs):   #VGG16
+	def localization_VGG16(self,inputs):
 
 		with tf.variable_scope('localization_network'):
 			with slim.arg_scope([slim.conv2d, slim.fully_connected],
@@ -152,9 +154,68 @@ class Network(object):
 
 				net = slim.fully_connected(tf.reshape(net, [-1, shape]), 4096, scope='fc6')
 				net = slim.fully_connected(net, 1024, scope='fc7')
-				net = slim.fully_connected(net, 3, biases_initializer = tf.constant_initializer(1.0) , scope='fc8')
+				identity = np.array([[1., 0., 0.],
+									[0., 1., 0.]])
+				identity = identity.flatten()
+				net = slim.fully_connected(net, 6, biases_initializer = tf.constant_initializer(identity) , scope='fc8')
 			
 		return net
+
+
+	def localization_squeezenet(self, inputs):
+
+		with tf.variable_scope('localization_network'):	
+			with slim.arg_scope([slim.conv2d], activation_fn = tf.nn.relu,
+									padding = 'SAME',
+									weights_initializer = tf.constant_initializer(0.0)):
+
+				conv1 = slim.conv2d(inputs, 64, [3,3], 2, padding = 'VALID', scope='conv1')
+				pool1 = slim.max_pool2d(conv1, [2,2], 2, scope='pool1')
+				fire2 = self.fire_module(pool1, 16, 64, scope = 'fire2')
+				fire3 = self.fire_module(fire2, 16, 64, scope = 'fire3', res_connection=True)
+				fire4 = self.fire_module(fire3, 32, 128, scope = 'fire4')
+				pool4 = slim.max_pool2d(fire4, [2,2], 2, scope='pool4')
+				fire5 = self.fire_module(pool4, 32, 128, scope = 'fire5', res_connection=True)
+				fire6 = self.fire_module(fire5, 48, 192, scope = 'fire6')
+				fire7 = self.fire_module(fire6, 48, 192, scope = 'fire7', res_connection=True)
+				fire8 = self.fire_module(fire7, 64, 256, scope = 'fire8')
+				pool8 = slim.max_pool2d(fire8, [2,2], 2, scope='pool8')
+				fire9 = self.fire_module(pool8, 64, 256, scope = 'fire9', res_connection=True)
+				conv10 = slim.conv2d(fire9, 128, [1,1], 1, scope='conv10')
+				shape = int(np.prod(conv10.get_shape()[1:]))
+				fc11 = slim.fully_connected(tf.reshape(conv10, [-1, shape]), 6, biases_initializer = tf.constant_initializer(np.array([[1., 0., 0.],
+																										  [0., 1., 0.]])) , scope='fc11')
+		return fc11
+
+
+	def fire_module(self, inputs, s_channels, e_channels, scope, res_connection = False):
+		with tf.variable_scope(scope):
+			sq = self.squeeze(inputs, s_channels, 'squeeze')
+			ex = self.expand(sq, e_channels, 'expand')
+			if res_connection:
+				ret = tf.nn.relu(tf.add(inputs,ex))
+			else:
+				ret = tf.nn.relu(ex)
+		return ret
+
+
+	def squeeze(self, inputs, channels, scope):
+		with slim.arg_scope([slim.conv2d], activation_fn = None,
+							padding = 'SAME',
+							weights_initializer = tf.truncated_normal_initializer(0.0, 0.01)):
+			sq = slim.conv2d(inputs, channels, [1,1], 1, scope = scope)
+		return sq
+
+	def expand(self, inputs, channels, scope):
+		with slim.arg_scope([slim.conv2d], activation_fn = None,
+							padding = 'SAME',
+							weights_initializer = tf.truncated_normal_initializer(0.0, 0.01)):
+			with tf.variable_scope(scope):
+				e1x1 = slim.conv2d(inputs, channels, [1,1], 1, scope='e1x1')
+				e3x3 = slim.conv2d(inputs, channels, [3,3], 1, scope='e3x3')
+				expand = tf.concat(3, [e1x1, e3x3])
+		
+		return expand
 
 
 
