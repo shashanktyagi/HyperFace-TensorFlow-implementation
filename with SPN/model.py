@@ -7,7 +7,7 @@ from pdb import set_trace as brk
 
 class Network(object):
 
-	def __init__(self, sess):
+	def __init__(self, sess,tf_record_file_path=None):
 
 		self.sess = sess
 		self.batch_size = 2
@@ -26,6 +26,8 @@ class Network(object):
 		self.weight_pose = 5
 		self.weight_gender = 2
 
+		#tf_Record Paramters
+		self.filename_queue = tf.train.string_input_producer([tf_record_file_path], num_epochs=self.num_epochs)
 		self.build_network()
 
 
@@ -38,9 +40,9 @@ class Network(object):
 		self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
 		self.gender = tf.placeholder(tf.float32, [self.batch_size,2], name='gender')
 
-
+		self.X = self.load_from_tfRecord(self.filename_queue,resize_size=(self.img_width,self.img_height))
+		
 		theta = self.localization_network(self.X)
-
 		T_mat = self.get_transformation_matrix(theta)
 		
 		cropped = transformer(self.X, T_mat, [self.out_height, self.out_width])
@@ -175,7 +177,31 @@ class Network(object):
 		brk()
 
 
+	def load_from_tfRecord(self,filename_queue,resize_size=None):
+		
+		reader = tf.TFRecordReader()
+		_, serialized_example = reader.read(filename_queue)
+		
+		features = tf.parse_single_example(
+			serialized_example,
+			features={
+				'image_raw':tf.FixedLenFeature([], tf.string),
+				'width': tf.FixedLenFeature([], tf.int64),
+				'height': tf.FixedLenFeature([], tf.int64)
+			})
+		
+		image = tf.decode_raw(features['image_raw'], tf.float32)
+		orig_height = tf.cast(features['height'], tf.int32)
+		orig_width = tf.cast(features['width'], tf.int32)
+		
+		image_shape = tf.pack([orig_height,orig_width,3])
+		image_tf = tf.reshape(image,image_shape)
 
+		resized_image = tf.image.resize_image_with_crop_or_pad(image_tf,target_height=resize_size[1],target_width=resize_size[0])
+		
+		images = tf.train.shuffle_batch([resized_image],batch_size=self.batch_size,num_threads=1,capacity=50,min_after_dequeue=10)
+		
+		return images
 
 	def load_weights(self, path):
 		variables = slim.get_model_variables()
