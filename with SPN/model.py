@@ -41,9 +41,6 @@ class Network(object):
 		self.gender = tf.placeholder(tf.float32, [self.batch_size,2], name='gender')
 
 
-		
-		self.X = self.load_from_tfRecord(self.filename_queue,resize_size=(self.img_width,self.img_height))
-
 		theta = self.localization_squeezenet(self.X)
 		self.T_mat = tf.reshape(theta, [-1, 2,3])
 		self.cropped = transformer(self.X, self.T_mat, [self.out_height, self.out_width])
@@ -87,6 +84,14 @@ class Network(object):
 
 		print self.sess.run(self.T_mat, feed_dict={self.X: np.random.randn(self.batch_size, self.img_height, self.img_width, self.channel)})
 
+		images = self.load_from_tfRecord(self.filename_queue)
+
+		coord = tf.train.Coordinator()
+		threads = tf.train.start_queue_runners(sess = self.sess, coord = coord)
+
+		for i in xrange(2):
+			img_batch = self.sess.run(images)
+			print img_batch.shape
 
 
 	def hyperface(self,inputs, reuse = False):
@@ -238,7 +243,6 @@ class Network(object):
 
 		brk()
 
-
 	def load_from_tfRecord(self,filename_queue,resize_size=None):
 		
 		reader = tf.TFRecordReader()
@@ -258,12 +262,14 @@ class Network(object):
 		
 		image_shape = tf.pack([orig_height,orig_width,3])
 		image_tf = tf.reshape(image,image_shape)
-
+		print image_shape
 		resized_image = tf.image.resize_image_with_crop_or_pad(image_tf,target_height=resize_size[1],target_width=resize_size[0])
 		
 		images = tf.train.shuffle_batch([resized_image],batch_size=self.batch_size,num_threads=1,capacity=50,min_after_dequeue=10)
 		
 		return images
+
+	
 
 	def load_weights(self, path):
 		variables = slim.get_model_variables()
