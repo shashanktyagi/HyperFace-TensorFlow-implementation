@@ -25,10 +25,6 @@ class HyperFace(object):
 		#tf_Record Paramters
 		self.filename_queue = tf.train.string_input_producer([tf_record_file_path], num_epochs=self.num_epochs)
 
-		#Spatial Transformer Input
-		self.sp_input_width = 500
-		self.sp_input_height = 500
-
 		self.build_network()
 
 
