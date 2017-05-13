@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import dlib
+from pdb import set_trace as brk
 
 tf_record_file = 'aflw_train.tfrecords'
 
@@ -45,7 +46,8 @@ def perform_selective_search(img,w,h,ground_truth):
 
 	return np.asarray(filter_positive_rects),np.asarray(filter_negative_rects)
 
-def split_(filename_queue):
+def split_(filename_queue, sess):
+	brk()
 	reader = tf.TFRecordReader()
 	_, serialized_example = reader.read(filename_queue)
 	
@@ -72,17 +74,19 @@ def split_(filename_queue):
 
 	image_shape = tf.pack([height, width, 3])
 	image = tf.reshape(image, image_shape)
-	boxes,box_ind = perform_selective_search(,tf.cast(width,tf.float32),tf.cast(height,tf.float32),(loc_x,loc_y,loc_x+loc_w,loc_y+loc_h))
-
-	resized_and_cropped_image = tf.image.crop_and_resize(image, boxes, box_ind, crop_size=[227,227])
+	height,width,loc_x,loc_y,loc_h,loc_w = sess.run([height,width,loc_x,loc_y,loc_h,loc_w])
+	# boxes,box_ind = perform_selective_search(,tf.cast(width,tf.float32),tf.cast(height,tf.float32),(loc_x,loc_y,loc_x+loc_w,loc_y+loc_h))
+	boxes = np.asarray([[loc_y/float(height),loc_x/float(width),(loc_y+loc_h)/float(height),(loc_x+loc_w)/float(width)]])
+	resized_and_cropped_image = tf.image.crop_and_resize(image.astype(np.float32), boxes.astype(np.float32), [0]*1, crop_size=[227,227])
 	
+
 	images = tf.train.shuffle_batch([resized_and_cropped_image],batch_size=10,num_threads=1,capacity=50,min_after_dequeue=10)
 	
 	return images
 	
 filename_queue = tf.train.string_input_producer([tf_record_file], num_epochs=1)
 
-images = split_(filename_queue)
+
 
 init_op = tf.group(tf.global_variables_initializer(),tf.local_variables_initializer())
 
@@ -91,6 +95,8 @@ print "model done"
 with tf.Session() as sess:
 	
 	sess.run(init_op)
+	images = split_(filename_queue, sess)
+	
 	coord = tf.train.Coordinator()
 	threads = tf.train.start_queue_runners(coord=coord)
 	op_images = sess.run([images])

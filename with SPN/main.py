@@ -15,6 +15,7 @@ map(os.unlink, (os.path.join( './logs',f) for f in os.listdir('./logs')) )
 with tf.Session() as sess:
 		print 'Building Graph...'
 		model = Network(sess,tf_record_file_path)
-		print 'Graph Built!'
+		print 'Done!\nInitializing variables...'
 		sess.run(tf.global_variables_initializer())
+		print 'Done!'
 		model.train()

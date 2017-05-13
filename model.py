@@ -1,6 +1,8 @@
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 import numpy as np
+from tqdm import tqdm
+from pdb import set_trace as brk
 
 
 class HyperFace(object):
@@ -62,7 +64,10 @@ class HyperFace(object):
 		writer = tf.summary.FileWriter('./logs', self.sess.graph)
 		loss_summ = tf.summary.scalar('loss', self.loss)
 
-	def network(self,inputs):
+	def network(self,inputs,reuse=False):
+
+		if reuse:
+			tf.get_variable_scope().reuse_variables()
 
 		with slim.arg_scope([slim.conv2d, slim.fully_connected],
 							 activation_fn = tf.nn.relu,
@@ -87,21 +92,40 @@ class HyperFace(object):
 			conv_all = slim.conv2d(concat_feat, 192, [1,1], 1, padding= 'VALID', scope='conv_all')
 			
 			shape = int(np.prod(conv_all.get_shape()[1:]))
-			fc_full = slim.fully_connected(tf.reshape(conv_all, [-1, shape]), 3072, scope='fc_full')
+			fc_full = slim.fully_connected(tf.reshape(tf.transpose(conv_all, [0,3,1,2]), [-1, shape]), 3072, scope='fc_full')
 
-			fc_detection = slim.fully_connected(fc_full, 512, scope='fc_detection')
-			fc_landmarks = slim.fully_connected(fc_full, 512, scope='fc_landmarks')
-			fc_visibility = slim.fully_connected(fc_full, 512, scope='fc_visibility')
-			fc_pose = slim.fully_connected(fc_full, 512, scope='fc_pose')
-			fc_gender = slim.fully_connected(fc_full, 512, scope='fc_gender')
+			fc_detection = slim.fully_connected(fc_full, 512, scope='fc_detection1')
+			fc_landmarks = slim.fully_connected(fc_full, 512, scope='fc_landmarks1')
+			fc_visibility = slim.fully_connected(fc_full, 512, scope='fc_visibility1')
+			fc_pose = slim.fully_connected(fc_full, 512, scope='fc_pose1')
+			fc_gender = slim.fully_connected(fc_full, 512, scope='fc_gender1')
 
-			out_detection = slim.fully_connected(fc_detection, 2, scope='out_detection')
-			out_landmarks = slim.fully_connected(fc_landmarks, 42, scope='out_landmarks')
-			out_visibility = slim.fully_connected(fc_visibility, 21, scope='out_visibility')
-			out_pose = slim.fully_connected(fc_pose, 3, scope='out_pose')
-			out_gender = slim.fully_connected(fc_gender, 2, scope='out_gender')
+			out_detection = slim.fully_connected(fc_detection, 2, scope='fc_detection2', activation_fn = None)
+			out_landmarks = slim.fully_connected(fc_landmarks, 42, scope='fc_landmarks2', activation_fn = None)
+			out_visibility = slim.fully_connected(fc_visibility, 21, scope='fc_visibility2', activation_fn = None)
+			out_pose = slim.fully_connected(fc_pose, 3, scope='fc_pose2', activation_fn = None)
+			out_gender = slim.fully_connected(fc_gender, 2, scope='fc_gender2', activation_fn = None)
 
-		return [out_detection, out_landmarks, out_visibility, out_pose, out_gender]
+		return [tf.nn.softmax(out_detection), out_landmarks, out_visibility, out_pose, tf.nn.softmax(out_gender)]
+
+
+
+	def predict(self, imgs_path):
+		print 'Running inference...'
+		np.set_printoptions(suppress=True)
+		imgs = (np.load(imgs_path) - 127.5)/128.0
+		shape = imgs.shape
+		self.X = tf.placeholder(tf.float32, [shape[0], self.img_height, self.img_width, self.channel], name='images')
+		pred = self.network(self.X, reuse = True)
+
+		net_preds = self.sess.run(pred, feed_dict={self.X: imgs})
+
+		print 'gender: \n', net_preds[-1]
+		import matplotlib.pyplot as plt
+		plt.imshow(imgs[-1]);plt.show()
+
+		brk()
+
 
 	def load_from_tfRecord(self,filename_queue):
 		
@@ -128,6 +152,18 @@ class HyperFace(object):
 		images = tf.train.shuffle_batch([resized_image],batch_size=self.batch_size,num_threads=1,capacity=50,min_after_dequeue=10)
 		
 		return images
+
+	def load_weights(self, path):
+		variables = slim.get_model_variables()
+		print 'Loading weights...'
+		for var in tqdm(variables):
+			if ('conv' in var.name) and ('weights' in var.name):
+				self.sess.run(var.assign(np.load(path+var.name.split('/')[0]+'/W.npy').transpose((2,3,1,0))))
+			elif ('fc' in var.name) and ('weights' in var.name):
+				self.sess.run(var.assign(np.load(path+var.name.split('/')[0]+'/W.npy').T))
+			elif 'biases' in var.name:
+				self.sess.run(var.assign(np.load(path+var.name.split('/')[0]+'/b.npy')))
+		print 'Weights loaded!!'
 
 	def print_variables(self):
 		variables = slim.get_model_variables()

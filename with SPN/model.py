@@ -4,6 +4,7 @@ import numpy as np
 from spatial_transformer import transformer
 from tqdm import tqdm
 from pdb import set_trace as brk
+import time
 
 class Network(object):
 
@@ -82,8 +83,11 @@ class Network(object):
 		loss_summ = tf.summary.scalar('loss', self.loss)
 		img_summ = tf.summary.image('cropped_image', self.cropped)
 
-		print self.sess.run(self.T_mat, feed_dict={self.X: np.random.randn(self.batch_size, self.img_height, self.img_width, self.channel)})
 
+		tic = time.time()
+		print self.sess.run(self.T_mat, feed_dict={self.X: np.random.randn(self.batch_size, self.img_height, self.img_width, self.channel)})
+		toc = time.time()
+		print toc-tic
 		images = self.load_from_tfRecord(self.filename_queue)
 
 		coord = tf.train.Coordinator()
@@ -122,8 +126,7 @@ class Network(object):
 			conv_all = slim.conv2d(concat_feat, 192, [1,1], 1, padding= 'VALID', scope='conv_all')
 			
 			shape = int(np.prod(conv_all.get_shape()[1:]))
-			# transposed for weight loading from chainer model
-			fc_full = slim.fully_connected(tf.reshape(tf.transpose(conv_all, [0,3,1,2]), [-1, shape]), 3072, scope='fc_full')
+			fc_full = slim.fully_connected(tf.reshape(conv_all, [-1, shape]), 3072, scope='fc_full')
 
 			fc_detection = slim.fully_connected(fc_full, 512, scope='fc_detection1')
 			fc_landmarks = slim.fully_connected(fc_full, 512, scope='fc_landmarks1')
@@ -191,8 +194,10 @@ class Network(object):
 				fire9 = self.fire_module(pool8, 64, 256, scope = 'fire9', res_connection=True)
 				conv10 = slim.conv2d(fire9, 128, [1,1], 1, scope='conv10')
 				shape = int(np.prod(conv10.get_shape()[1:]))
-				fc11 = slim.fully_connected(tf.reshape(conv10, [-1, shape]), 6, biases_initializer = tf.constant_initializer(np.array([[1., 0., 0.],
-																										  [0., 1., 0.]])) , scope='fc11')
+				identity = np.array([[1., 0., 0.],
+									[0., 1., 0.]])
+				identity = identity.flatten()
+				fc11 = slim.fully_connected(tf.reshape(conv10, [-1, shape]), 6, biases_initializer = tf.constant_initializer(identity), scope='fc11')
 		return fc11
 
 

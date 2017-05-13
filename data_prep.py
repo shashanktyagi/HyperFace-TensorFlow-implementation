@@ -1,27 +1,28 @@
 import numpy as np 
 import tensorflow as tf
-from skimage import io
+#from skimage import io
 import sqlite3
-import cv2
+#import cv2
 import matplotlib.pyplot as plt
 import os
 import random
+from tqdm import tqdm
 
-select_string = "faceimages.filepath, faces.face_id, facepose.roll, facepose.pitch, facepose.yaw, facerect.x, facerect.y, facerect.w, facerect.h"
-from_string = "faceimages, faces, facepose, facerect"
-where_string = "faces.face_id = facepose.face_id and faces.file_id = faceimages.file_id and faces.face_id = facerect.face_id"
-query_string = "SELECT " + select_string + " FROM " + from_string + " WHERE " + where_string
+# select_string = "faceimages.filepath, faces.face_id, facepose.roll, facepose.pitch, facepose.yaw, facerect.x, facerect.y, facerect.w, facerect.h"
+# from_string = "faceimages, faces, facepose, facerect"
+# where_string = "faces.face_id = facepose.face_id and faces.file_id = faceimages.file_id and faces.face_id = facerect.face_id"
+# query_string = "SELECT " + select_string + " FROM " + from_string + " WHERE " + where_string
 
-conn = sqlite3.connect('/home/shashank/Documents/CSE-252C/AFLW/aflw/data/aflw.sqlite')
-c = conn.cursor()
+# conn = sqlite3.connect('/home/shashank/Documents/CSE-252C/AFLW/aflw/data/aflw.sqlite')
+# c = conn.cursor()
 
 img_path = '/home/shashank/Documents/CSE-252C/AFLW/'
 
-tfrecords_train_filename = 'aflw_train.tfrecords'
-tfrecords_test_filename = 'aflw_test.tfrecords'
-
-writer_train = tf.python_io.TFRecordWriter(tfrecords_train_filename)
-writer_test = tf.python_io.TFRecordWriter(tfrecords_test_filename)
+# tfrecords_train_filename = 'aflw_train.tfrecords'
+# tfrecords_test_filename = 'aflw_test.tfrecords'
+tfrecords_filename = 'aflw_train.tfrecords'
+# writer_train = tf.python_io.TFRecordWriter(tfrecords_train_filename)
+# writer_test = tf.python_io.TFRecordWriter(tfrecords_test_filename)
 
 def _bytes_feature(value):
 	return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
@@ -103,9 +104,10 @@ def make_tfrecord(test_images):
 	writer_train.close()
 	writer_test.close()
 
-def extract_tfrecord():
+def extract_tfrecord(session):
 	record_iterator = tf.python_io.tf_record_iterator(path=tfrecords_filename)
-
+	save_data = None
+	save_euler = []
 	for string_record in record_iterator:
 		example = tf.train.Example()
 		example.ParseFromString(string_record)
@@ -118,13 +120,29 @@ def extract_tfrecord():
 		loc_y = int(example.features.feature['loc_y'].int64_list.value[0])
 		loc_w = int(example.features.feature['loc_w'].int64_list.value[0])
 		loc_h = int(example.features.feature['loc_h'].int64_list.value[0])
-		cv2.rectangle(img_1d,(loc_x,loc_y),(loc_x+loc_w,loc_y+loc_h),(0,255,0),3)
-		cv2.imshow('result',img_1d)
-		cv2.waitKey(0)
-		
+		roll = float(example.features.feature['roll'].float_list.value[0])
+		yaw = float(example.features.feature['yaw'].float_list.value[0])
+		pitch = float(example.features.feature['pitch'].float_list.value[0])
+
+		boxes = np.asarray([[loc_y/float(img_height),loc_x/float(img_width),(loc_y+loc_h)/float(img_height),(loc_x+loc_w)/float(img_width)]])
+		resized_and_cropped_image = tf.image.crop_and_resize(img_1d[np.newaxis,:,:,:].astype(np.float32), boxes.astype(np.float32), [0]*1, crop_size=[227,227])
+		if save_data is not None:
+			save_data = np.concatenate([save_data,resized_and_cropped_image.eval(session=session)],axis=0)
+		else:
+			save_data = resized_and_cropped_image.eval(session=session)
+		save_euler.append([roll,yaw,pitch])
+
+	np.save('truth_data.npy',save_data)
+	np.save('annotations.npy',np.asarray(save_euler))
+	
+		# cv2.rectangle(img_1d,(loc_x,loc_y),(loc_x+loc_w,loc_y+loc_h),(0,255,0),3)
+		# cv2.imshow('result',img_1d)
+		# cv2.waitKey(0)
+				
 		
 if __name__ == '__main__':
-	test_images = test_names()
-	make_tfrecord(test_images)
-	#extract_tfrecord()
+	#test_images = test_names()
+	#make_tfrecord(test_images)
+	session = tf.Session()
+	extract_tfrecord(session)
 
