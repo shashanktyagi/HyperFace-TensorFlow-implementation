@@ -7,7 +7,7 @@ from pdb import set_trace as brk
 
 class HyperFace(object):
 
-	def __init__(self,tf_record_file_path=None):
+	def __init__(self,load_model,tf_record_file_path=None,model_save_path=None,best_model_save_path=None,restore_model_path=None):
 
 		self.batch_size = 2
 		self.img_height = 227
@@ -28,13 +28,20 @@ class HyperFace(object):
 		self.filename_queue = tf.train.string_input_producer([self.tf_record_file_path], num_epochs=self.num_epochs)
 		self.images, self.labels = self.load_from_tfRecord(self.filename_queue)
 
+		self.model_save_path = model_save_path
+		self.best_model_save_path = best_model_save_path
+		self.restore_model_path = restore_model_path
+
+		self.save_after_steps = 200
+		self.print_after_steps = 50
+		self.load_model =  load_model
 
 	def build_network(self, sess):
 
 		self.sess = sess
 
 		self.X = tf.placeholder(tf.float32, [self.batch_size, self.img_height, self.img_width, self.channel], name='images')
-		self.detection = tf.placeholder(tf.float32, [self.batch_size], name='detection')
+		self.detection = tf.placeholder(tf.int32, [self.batch_size], name='detection')
 		# self.landmarks = tf.placeholder(tf.float32, [self.batch_size, 42], name='landmarks')
 		# self.visibility = tf.placeholder(tf.float32, [self.batch_size,21], name='visibility')
 		# self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
@@ -55,15 +62,26 @@ class HyperFace(object):
 		# 			+ self.weight_visibility*loss_visibility + self.weight_pose*loss_pose  \
 		# 			+ self.weight_gender*loss_gender
 
-		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.cast(tf.argmax(net_output,1),tf.int32),self.detection),tf.float32))
+		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(logits=tf.cast(tf.argmax(net_output,1),tf.int32),labels=self.detection),tf.float32))
 
 		self.loss = loss_detection
+		self.optimizer = tf.train.AdamOptimizer().minimize(self.loss)
 
 	def train(self):
 		
-		optimizer = tf.train.AdamOptimizer().minimize(self.loss)
-		self.sess.run(tf.group(tf.global_variables_initializer(),tf.local_variables_initializer()))
+		
+		if self.load_model:
+			print "Restoring Model"
+			ckpt = tf.train.get_checkpoint_state(self.model_save_path)
+			if ckpt and ckpt.model_checkpoint_path:
+				self.saver.restore(self.sess,ckpt.model_checkpoint_path)
+		else:
+			print "Initializing Model"
+			self.sess.run(tf.group(tf.global_variables_initializer(),tf.local_variables_initializer()))
 
+		
+		coord = tf.train.Coordinator()
+		threads = tf.train.start_queue_runners(sess=self.sess,coord=coord)
 
 		writer = tf.summary.FileWriter('./logs', self.sess.graph)
 		loss_summ = tf.summary.scalar('loss', self.loss)
@@ -72,7 +90,8 @@ class HyperFace(object):
 
 		summ_op = tf.summary.merge_all()
 
-		counter = 1
+		counter = 0
+		best_loss = sys.maxint
 		try:
 			while not coord.should_stop():
 				batch_imgs,batch_labels = self.sess.run([self.images,self.labels])
@@ -84,7 +103,15 @@ class HyperFace(object):
 				
 				writer.add_summary(summ, counter)
 
-				print "Iteration: {}\tLoss: {}\tAccuracy: {}".format(counter,loss, accuracy)
+				if (counter%self.save_after_steps == 0):
+					self.saver.save(self.sess,self.model_save_path+'statefarm_model',global_step=int(counter),write_meta_graph=False)
+				
+				if batch_loss <= best_loss:
+					best_loss = batch_loss
+					self.best_saver.save(self.sess,self.best_model_save_path+'statefarm_best_model',global_step=int(counter),write_meta_graph=False)
+					
+				if counter%self.print_after_steps == 0:
+					print "Iteration:{},Loss:{},Accuracy:{}".format(counter,batch_loss,accuracy)
 				counter += 1
 
 		except tf.errors.OutOfRangeError:
@@ -122,11 +149,11 @@ class HyperFace(object):
 			conv5 = slim.conv2d(conv4, 256, [3,3], 1, scope='conv5')
 			pool5 = slim.max_pool2d(conv5, [3,3], 2, padding= 'VALID', scope='pool5')
 
-			concat_feat = tf.concat(3, [conv1a, conv3a, pool5])
+			concat_feat = tf.concat([conv1a, conv3a, pool5],3)
 			conv_all = slim.conv2d(concat_feat, 192, [1,1], 1, padding= 'VALID', scope='conv_all')
 			
 			shape = int(np.prod(conv_all.get_shape()[1:]))
-			fc_full = slim.fully_connected(tf.reshape(tf.transpose(conv_all, [0,3,1,2]), [-1, shape]), 3072, scope='fc_full')
+			fc_full = slim.fully_connected(tf.reshape(conv_all, [-1, shape]), 3072, scope='fc_full')
 
 			fc_detection = slim.fully_connected(fc_full, 512, scope='fc_detection1')
 			fc_landmarks = slim.fully_connected(fc_full, 512, scope='fc_landmarks1')
