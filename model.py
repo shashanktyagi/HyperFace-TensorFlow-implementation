@@ -160,7 +160,6 @@ class HyperFace(object):
 
 		brk()
 
-
 	def load_from_tfRecord(self,filename_queue):
 		
 		reader = tf.TFRecordReader()
@@ -171,22 +170,51 @@ class HyperFace(object):
 			features={
 				'image_raw':tf.FixedLenFeature([], tf.string),
 				'width': tf.FixedLenFeature([], tf.int64),
-				'height': tf.FixedLenFeature([], tf.int64)
+				'height': tf.FixedLenFeature([], tf.int64),
+				'pos_locs':tf.FixedLenFeature([], tf.string),
+				'neg_locs':tf.FixedLenFeature([], tf.string),
+				'n_pos_locs':tf.FixedLenFeature([], tf.int64),
+				'n_neg_locs':tf.FixedLenFeature([], tf.int64),
+
 			})
 		
-		image = tf.decode_raw(features['image_raw'], tf.float32)
+		image = tf.decode_raw(features['image_raw'], tf.uint8)
+		pos_locs = tf.decode_raw(features['pos_locs'], tf.float32)
+		neg_locs = tf.decode_raw(features['neg_locs'], tf.float32)
+
+
 		orig_height = tf.cast(features['height'], tf.int32)
 		orig_width = tf.cast(features['width'], tf.int32)
-		
-		image_shape = tf.pack([orig_height,orig_width,3])
-		image_tf = tf.reshape(image,image_shape)
+		n_pos_locs = tf.cast(features['n_pos_locs'], tf.int32)
+		n_neg_locs = tf.cast(features['n_neg_locs'], tf.int32)
 
-		resized_image = tf.image.resize_image_with_crop_or_pad(image_tf,target_height=self.img_height,target_width=self.img_width)
-		
-		images = tf.train.shuffle_batch([resized_image],batch_size=self.batch_size,num_threads=1,capacity=50,min_after_dequeue=10)
-		
-		return images
+		image_shape = tf.stack([1,orig_height,orig_width,3])
+		image = tf.cast(tf.reshape(image,image_shape),tf.float32)
 
+		pos_locs_shape = tf.stack([n_pos_locs,4])
+		pos_locs = tf.reshape(pos_locs,pos_locs_shape)
+
+		neg_locs_shape = tf.stack([n_neg_locs,4])
+		neg_locs = tf.reshape(neg_locs,neg_locs_shape)
+
+		positive_cropped = tf.image.crop_and_resize(image,pos_locs,tf.zeros([n_pos_locs],dtype=tf.int32),[227,227])
+		negative_cropped = tf.image.crop_and_resize(image,neg_locs,tf.zeros([n_neg_locs],dtype=tf.int32),[227,227])
+
+		all_images = tf.concat([positive_cropped,negative_cropped],axis=0)
+
+		positive_labels = tf.ones([n_pos_locs])
+		negative_labels = tf.zeros([n_neg_locs])
+
+		all_labels = tf.concat([positive_labels,negative_labels],axis=0)
+
+		tf.random_shuffle(all_images,seed=7)
+		tf.random_shuffle(all_labels,seed=7)
+		
+		images,labels = tf.train.shuffle_batch([all_images,all_labels],enqueue_many=True,batch_size=self.batch_size,num_threads=1,capacity=1000,min_after_dequeue=500)
+		
+		return images,labels
+
+	
 	def load_weights(self, path):
 		variables = slim.get_model_variables()
 		print 'Loading weights...'
