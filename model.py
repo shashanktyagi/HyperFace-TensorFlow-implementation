@@ -7,9 +7,8 @@ from pdb import set_trace as brk
 
 class HyperFace(object):
 
-	def __init__(self, sess,tf_record_file_path=None):
+	def __init__(self,tf_record_file_path=None):
 
-		self.sess = sess
 		self.batch_size = 2
 		self.img_height = 227
 		self.img_width = 227
@@ -17,52 +16,87 @@ class HyperFace(object):
 
 		self.num_epochs = 10
 
-		# Hyperparameters
-		self.weight_detect = 1
-		self.weight_landmarks = 5
-		self.weight_visibility = 0.5
-		self.weight_pose = 5
-		self.weight_gender = 2
+		# Hyperparameters  1,5,0.5,5,2
+		self.weight_detect = 1      
+		self.weight_landmarks = 0
+		self.weight_visibility = 0
+		self.weight_pose = 0
+		self.weight_gender = 0
 
 		#tf_Record Paramters
-		self.filename_queue = tf.train.string_input_producer([tf_record_file_path], num_epochs=self.num_epochs)
+		self.tf_record_file_path = tf_record_file_path
+		self.filename_queue = tf.train.string_input_producer([self.tf_record_file_path], num_epochs=self.num_epochs)
+		self.images, self.labels = self.load_from_tfRecord(self.filename_queue)
 
-		self.build_network()
 
+	def build_network(self, sess):
 
-	def build_network(self):
+		self.sess = sess
 
 		self.X = tf.placeholder(tf.float32, [self.batch_size, self.img_height, self.img_width, self.channel], name='images')
-		self.detection = tf.placeholder(tf.float32, [self.batch_size,2], name='detection')
-		self.landmarks = tf.placeholder(tf.float32, [self.batch_size, 42], name='landmarks')
-		self.visibility = tf.placeholder(tf.float32, [self.batch_size,21], name='visibility')
-		self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
-		self.gender = tf.placeholder(tf.float32, [self.batch_size,2], name='gender')
-		
-		self.X = self.load_from_tfRecord(self.filename_queue)
+		self.detection = tf.placeholder(tf.float32, [self.batch_size], name='detection')
+		# self.landmarks = tf.placeholder(tf.float32, [self.batch_size, 42], name='landmarks')
+		# self.visibility = tf.placeholder(tf.float32, [self.batch_size,21], name='visibility')
+		# self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
+		# self.gender = tf.placeholder(tf.float32, [self.batch_size,2], name='gender')
 		
 		net_output = self.network(self.X) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
 
-		loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(net_output[0], self.detection))
+		loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(net_output, tf.one_hot(self.detection, 2)))
 		
-		visibility_mask = tf.reshape(tf.tile(tf.expand_dims(self.visibility, axis=2), [1,1,2]), [self.batch_size, -1])
-		loss_landmarks = tf.reduce_mean(tf.square(visibility_mask*(net_output[1] - self.landmarks)))
+		# visibility_mask = tf.reshape(tf.tile(tf.expand_dims(self.visibility, axis=2), [1,1,2]), [self.batch_size, -1])
+		# loss_landmarks = tf.reduce_mean(tf.square(visibility_mask*(net_output[1] - self.landmarks)))
 		
-		loss_visibility = tf.reduce_mean(tf.square(net_output[2] - self.visibility))
-		loss_pose = tf.reduce_mean(tf.square(net_output[3] - self.pose))
-		loss_gender = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(net_output[4], self.gender))
+		# loss_visibility = tf.reduce_mean(tf.square(net_output[2] - self.visibility))
+		# loss_pose = tf.reduce_mean(tf.square(net_output[3] - self.pose))
+		# loss_gender = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(net_output[4], self.gender))
 
-		self.loss = self.weight_detect*loss_detection + self.weight_landmarks*loss_landmarks  \
-					+ self.weight_visibility*loss_visibility + self.weight_pose*loss_pose  \
-					+ self.weight_gender*loss_gender
+		# self.loss = self.weight_detect*loss_detection + self.weight_landmarks*loss_landmarks  \
+		# 			+ self.weight_visibility*loss_visibility + self.weight_pose*loss_pose  \
+		# 			+ self.weight_gender*loss_gender
 
+		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.cast(tf.argmax(net_output,1),tf.int32),self.detection),tf.float32))
+
+		self.loss = loss_detection
 
 	def train(self):
 		
 		optimizer = tf.train.AdamOptimizer().minimize(self.loss)
+		self.sess.run(tf.group(tf.global_variables_initializer(),tf.local_variables_initializer()))
+
 
 		writer = tf.summary.FileWriter('./logs', self.sess.graph)
 		loss_summ = tf.summary.scalar('loss', self.loss)
+		img_summ = tf.summary.image('images', self.images, max_outputs=5)
+		label_summ = tf.summary.histogram('labels', self.detection)
+
+		summ_op = tf.summary.merge_all()
+
+		counter = 1
+		try:
+			while not coord.should_stop():
+				batch_imgs,batch_labels = self.sess.run([self.images,self.labels])
+				batch_imgs = (batch_imgs - 127.5) / 128.0
+				
+				input_feed={self.X: batch_imgs, self.Y: batch_labels}
+				
+				_,loss, summ, accuracy = self.sess.run([optimizer, self.loss, summ_op, self.accuracy], self,input_feed)
+				
+				writer.add_summary(summ, counter)
+
+				print "Iteration: {}\tLoss: {}\tAccuracy: {}".format(counter,loss, accuracy)
+				counter += 1
+
+		except tf.errors.OutOfRangeError:
+			print('Done training -- epoch limit reached')
+		finally:
+			coord.request_stop()
+
+		coord.join(threads)	
+
+
+
+
 
 	def network(self,inputs,reuse=False):
 
@@ -106,7 +140,7 @@ class HyperFace(object):
 			out_pose = slim.fully_connected(fc_pose, 3, scope='fc_pose2', activation_fn = None)
 			out_gender = slim.fully_connected(fc_gender, 2, scope='fc_gender2', activation_fn = None)
 
-		return [tf.nn.softmax(out_detection), out_landmarks, out_visibility, out_pose, tf.nn.softmax(out_gender)]
+		return out_detection #[tf.nn.softmax(out_detection), out_landmarks, out_visibility, out_pose, tf.nn.softmax(out_gender)]
 
 
 

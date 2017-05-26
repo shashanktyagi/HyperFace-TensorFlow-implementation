@@ -11,13 +11,13 @@ if not os.path.exists('./logs'):
 
 map(os.unlink, (os.path.join( './logs',f) for f in os.listdir('./logs')) )
 
+net = HyperFace(tf_record_file_path='aflw_train.tfrecords')
 
 with tf.Session() as sess:
 		print 'Building Graph...'
-		net = HyperFace(sess,tf_record_file_path='aflw_train.tfrecords')
+		net.build_network(sess)
 		print 'Graph Built!'
-		sess.run(tf.global_variables_initializer())
-		net.print_variables()
+		# net.print_variables()
 		net.load_weights(weights_path)
-		net.predict(imgs_path)
+		net.train()
 
