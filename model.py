@@ -3,18 +3,18 @@ import tensorflow.contrib.slim as slim
 import numpy as np
 from tqdm import tqdm
 from pdb import set_trace as brk
-
+import sys
 
 class HyperFace(object):
 
 	def __init__(self,load_model,tf_record_file_path=None,model_save_path=None,best_model_save_path=None,restore_model_path=None):
 
-		self.batch_size = 2
+		self.batch_size = 32
 		self.img_height = 227
 		self.img_width = 227
 		self.channel = 3
 
-		self.num_epochs = 10
+		self.num_epochs = 20
 
 		# Hyperparameters  1,5,0.5,5,2
 		self.weight_detect = 1      
@@ -35,6 +35,7 @@ class HyperFace(object):
 		self.save_after_steps = 200
 		self.print_after_steps = 50
 		self.load_model =  load_model
+	
 
 	def build_network(self, sess):
 
@@ -66,6 +67,9 @@ class HyperFace(object):
 
 		self.loss = loss_detection
 		self.optimizer = tf.train.AdamOptimizer().minimize(self.loss)
+		self.saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=4)
+		self.best_saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=4)
+
 
 	def train(self):
 		
@@ -87,7 +91,7 @@ class HyperFace(object):
 		loss_summ = tf.summary.scalar('loss', self.loss)
 		img_summ = tf.summary.image('images', self.images, max_outputs=5)
 		label_summ = tf.summary.histogram('labels', self.detection)
-
+		
 		summ_op = tf.summary.merge_all()
 
 		counter = 0
@@ -97,21 +101,21 @@ class HyperFace(object):
 				batch_imgs,batch_labels = self.sess.run([self.images,self.labels])
 				batch_imgs = (batch_imgs - 127.5) / 128.0
 				
-				input_feed={self.X: batch_imgs, self.Y: batch_labels}
+				input_feed={self.X: batch_imgs, self.detection: batch_labels}
 				
-				_,loss, summ, accuracy = self.sess.run([optimizer, self.loss, summ_op, self.accuracy], self,input_feed)
+				_,loss, summ, accuracy = self.sess.run([self.optimizer, self.loss, summ_op, self.accuracy], input_feed)
 				
 				writer.add_summary(summ, counter)
 
 				if (counter%self.save_after_steps == 0):
 					self.saver.save(self.sess,self.model_save_path+'statefarm_model',global_step=int(counter),write_meta_graph=False)
 				
-				if batch_loss <= best_loss:
-					best_loss = batch_loss
+				if loss <= best_loss:
+					best_loss = loss
 					self.best_saver.save(self.sess,self.best_model_save_path+'statefarm_best_model',global_step=int(counter),write_meta_graph=False)
 					
 				if counter%self.print_after_steps == 0:
-					print "Iteration:{},Loss:{},Accuracy:{}".format(counter,batch_loss,accuracy)
+					print "Iteration:{},Loss:{},Accuracy:{}".format(counter,loss,accuracy)
 				counter += 1
 
 		except tf.errors.OutOfRangeError:
