@@ -43,29 +43,32 @@ class HyperFace(object):
 
 		self.X = tf.placeholder(tf.float32, [self.batch_size, self.img_height, self.img_width, self.channel], name='images')
 		self.detection = tf.placeholder(tf.int32, [self.batch_size], name='detection')
-		# self.landmarks = tf.placeholder(tf.float32, [self.batch_size, 42], name='landmarks')
-		# self.visibility = tf.placeholder(tf.float32, [self.batch_size,21], name='visibility')
-		# self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
-		# self.gender = tf.placeholder(tf.float32, [self.batch_size,2], name='gender')
+		self.landmarks = tf.placeholder(tf.float32, [self.batch_size, 42], name='landmarks')
+		self.visibility = tf.placeholder(tf.float32, [self.batch_size,21], name='visibility')
+		self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
+		self.gender = tf.placeholder(tf.float32, [self.batch_size,2], name='gender')
 		
 		net_output = self.network(self.X) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
 
 		loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=net_output, labels=tf.one_hot(self.detection, 2)))
-		
-		# visibility_mask = tf.reshape(tf.tile(tf.expand_dims(self.visibility, axis=2), [1,1,2]), [self.batch_size, -1])
-		# loss_landmarks = tf.reduce_mean(tf.square(visibility_mask*(net_output[1] - self.landmarks)))
-		
-		# loss_visibility = tf.reduce_mean(tf.square(net_output[2] - self.visibility))
-		# loss_pose = tf.reduce_mean(tf.square(net_output[3] - self.pose))
-		# loss_gender = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(net_output[4], self.gender))
 
-		# self.loss = self.weight_detect*loss_detection + self.weight_landmarks*loss_landmarks  \
-		# 			+ self.weight_visibility*loss_visibility + self.weight_pose*loss_pose  \
-		# 			+ self.weight_gender*loss_gender
+		detection_mask = tf.expand_dims(self.detection, axis=1)
+		
+		visibility_mask = tf.reshape(tf.tile(tf.expand_dims(self.visibility, axis=2), [1,1,2]), [self.batch_size, -1])
+		loss_landmarks = tf.reduce_mean(tf.square(detection_mask*visibility_mask*(net_output[1] - self.landmarks)))
+		
+		loss_visibility = tf.reduce_mean(tf.square(detection_mask*(net_output[2] - self.visibility)))
+		loss_pose = tf.reduce_mean(tf.square(detection_mask*(net_output[3] - self.pose)))
+		loss_gender = tf.reduce_mean(detection_mask*tf.nn.sigmoid_cross_entropy_with_logits(net_output[4], self.gender))
+
+
+		self.loss = self.weight_detect*loss_detection + self.weight_landmarks*loss_landmarks  \
+					+ self.weight_visibility*loss_visibility + self.weight_pose*loss_pose  \
+					+ self.weight_gender*loss_gender
 
 		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.cast(tf.argmax(net_output,1),tf.int32),self.detection),tf.float32))
 
-		self.loss = loss_detection
+		# self.loss = loss_detection
 		self.optimizer = tf.train.AdamOptimizer().minimize(self.loss)
 		self.saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=4)
 		self.best_saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=4)
@@ -171,7 +174,7 @@ class HyperFace(object):
 			out_pose = slim.fully_connected(fc_pose, 3, scope='fc_pose2', activation_fn = None)
 			out_gender = slim.fully_connected(fc_gender, 2, scope='fc_gender2', activation_fn = None)
 
-		return out_detection #[tf.nn.softmax(out_detection), out_landmarks, out_visibility, out_pose, tf.nn.softmax(out_gender)]
+		return [out_detection, out_landmarks, out_visibility, out_pose, out_gender]
 
 
 
