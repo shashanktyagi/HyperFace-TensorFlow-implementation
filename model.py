@@ -46,7 +46,7 @@ class HyperFace(object):
 		self.landmarks = tf.placeholder(tf.float32, [self.batch_size, 42], name='landmarks')
 		self.visibility = tf.placeholder(tf.float32, [self.batch_size,21], name='visibility')
 		self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
-		self.gender = tf.placeholder(tf.float32, [self.batch_size,2], name='gender')
+		self.gender = tf.placeholder(tf.float32, [self.batch_size], name='gender')
 		
 		net_output = self.network(self.X) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
 
@@ -59,7 +59,7 @@ class HyperFace(object):
 		
 		loss_visibility = tf.reduce_mean(tf.square(detection_mask*(net_output[2] - self.visibility)))
 		loss_pose = tf.reduce_mean(tf.square(detection_mask*(net_output[3] - self.pose)))
-		loss_gender = tf.reduce_mean(detection_mask*tf.nn.sigmoid_cross_entropy_with_logits(net_output[4], self.gender))
+		loss_gender = tf.reduce_mean(detection_mask*tf.nn.sigmoid_cross_entropy_with_logits(logits=net_output[4], labels=tf.one_hot(self.gender,2)))
 
 
 		self.loss = self.weight_detect*loss_detection + self.weight_landmarks*loss_landmarks  \
@@ -192,7 +192,7 @@ class HyperFace(object):
 		import matplotlib.pyplot as plt
 		plt.imshow(imgs[-1]);plt.show()
 
-		brk()
+		
 
 	def load_from_tfRecord(self,filename_queue):
 		
@@ -209,13 +209,31 @@ class HyperFace(object):
 				'neg_locs':tf.FixedLenFeature([], tf.string),
 				'n_pos_locs':tf.FixedLenFeature([], tf.int64),
 				'n_neg_locs':tf.FixedLenFeature([], tf.int64),
+				'gender':tf.FixedLenFeature([], tf.int64),
+				'pose': tf.FixedLenFeature([], tf.string),
+				'landmarks':tf.FixedLenFeature([], tf.string),
+				'visibility':tf.FixedLenFeature([], tf.string),
 
 			})
 		
+		landmarks = tf.decode_raw(features['landmarks'], tf.float32)
+		pose = tf.decode_raw(features['pose'], tf.float32)
+		visibility = tf.decode_raw(features['visibility'], tf.int32)
+		gender = tf.cast(features['gender'], tf.int32)
+
+		landmarks_shape = tf.stack([1,21*2])
+		pose_shape = tf.stack([1,3])
+		visibility_shape = tf.stack([1,21])
+		gender_shape = tf.stack([1,1])
+
+		landmarks = tf.reshape(landmarks,landmarks_shape)
+		visibility = tf.reshape(visibility,visibility_shape)
+		pose = tf.reshape(pose,pose_shape)
+		gender = tf.reshape(gender,gender_shape)
+
 		image = tf.decode_raw(features['image_raw'], tf.uint8)
 		pos_locs = tf.decode_raw(features['pos_locs'], tf.float32)
 		neg_locs = tf.decode_raw(features['neg_locs'], tf.float32)
-
 
 		orig_height = tf.cast(features['height'], tf.int32)
 		orig_width = tf.cast(features['width'], tf.int32)
@@ -239,14 +257,37 @@ class HyperFace(object):
 		positive_labels = tf.ones([n_pos_locs])
 		negative_labels = tf.zeros([n_neg_locs])
 
+
+		positive_landmarks = tf.tile(landmarks,[n_pos_locs,1])
+		negative_landmarks = tf.tile(landmarks,[n_neg_locs,1])
+
+		positive_visibility = tf.tile(visibility,[n_pos_locs,1])
+		negative_visibility = tf.tile(visibility,[n_neg_locs,1])
+
+		positive_pose = tf.tile(pose,[n_pos_locs,1])
+		negative_pose = tf.tile(pose,[n_neg_locs,1])
+
+		positive_gender = tf.tile(gender,[n_pos_locs,1])
+		negative_gender = tf.tile(gender,[n_neg_locs,1])
+		
+		all_landmarks = tf.concat([positive_landmarks,negative_landmarks],axis=0)
+		all_visibility = tf.concat([positive_visibility,negative_visibility],axis=0)
+		all_pose = tf.concat([positive_pose,negative_pose],axis=0)
+
 		all_labels = tf.concat([positive_labels,negative_labels],axis=0)
+		all_gender = tf.concat([positive_gender,negative_gender],axis=0)
 
 		tf.random_shuffle(all_images,seed=7)
 		tf.random_shuffle(all_labels,seed=7)
+		tf.random_shuffle(all_landmarks,seed=7)
+		tf.random_shuffle(all_visibility,seed=7)
+		tf.random_shuffle(all_pose,seed=7)
+		tf.random_shuffle(all_gender,seed=7)
+
+		images,labels,landmarks_,visibility_,pose_,gender_ = tf.train.shuffle_batch([all_images,all_labels,all_landmarks,all_visibility,all_pose,all_gender]
+			,enqueue_many=True,batch_size=self.batch_size,num_threads=1,capacity=1000,min_after_dequeue=500)
 		
-		images,labels = tf.train.shuffle_batch([all_images,all_labels],enqueue_many=True,batch_size=self.batch_size,num_threads=1,capacity=1000,min_after_dequeue=500)
-		
-		return images,labels
+		return images,labels,landmarks_,visibility_,pose_,gender_
 
 	
 	def load_weights(self, path):
