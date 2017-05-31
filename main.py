@@ -17,7 +17,8 @@ if not os.path.exists('../../best_checkpoint'):
 
 map(os.unlink, (os.path.join( './logs',f) for f in os.listdir('./logs')) )
 
-net = HyperFace(False,tf_record_file_path='../../aflw_train_small_new.tfrecords',model_save_path='../../checkpoint',best_model_save_path='../../best_checkpoint')
+net = HyperFace(True,tf_record_file_path='../../aflw_train_new.tfrecords',model_save_path='../../checkpoint/',best_model_save_path='../../best_checkpoint/',
+restore_model_path='../../saved_best_checkpoint')
 
 with tf.Session() as sess:
 		print 'Building Graph...'
