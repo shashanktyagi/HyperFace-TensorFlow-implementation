@@ -122,7 +122,7 @@ class HyperFace(object):
 				if loss <= best_loss:
 					best_loss = loss
 					self.best_saver.save(self.sess,self.best_model_save_path+'statefarm_best_model',global_step=int(counter),write_meta_graph=False)
-					self.save_weights(path=self.best_model_save_path, counter)
+					self.save_weights(self.best_model_save_path, counter)
 					
 				if counter % self.print_after_steps == 0:
 					print "Iteration:{},Loss:{},Accuracy:{}".format(counter,loss,accuracy)
