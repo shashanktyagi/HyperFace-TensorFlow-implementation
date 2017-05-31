@@ -50,7 +50,7 @@ class HyperFace(object):
 		
 		net_output = self.network_det(self.X) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
 
-		self.loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=net_output[0], labels=tf.one_hot(self.detection, 2)))
+		self.loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=net_output, labels=tf.one_hot(self.detection, 2)))
 
 		# detection_mask = tf.cast(tf.expand_dims(self.detection, axis=1),tf.float32)
 		
@@ -66,9 +66,9 @@ class HyperFace(object):
 		# 			+ self.weight_visibility*self.loss_visibility + self.weight_pose*self.loss_pose  \
 		# 			+ self.weight_gender*self.loss_gender
 
-		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.cast(tf.argmax(net_output[0],1),tf.int32),self.detection),tf.float32))
+		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.cast(tf.argmax(net_output,1),tf.int32),self.detection),tf.float32))
 
-		self.loss = loss_detection
+		self.loss = self.loss_detection
 		self.optimizer = tf.train.AdamOptimizer().minimize(self.loss)
 		self.saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=4)
 		self.best_saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=4)
@@ -160,7 +160,7 @@ class HyperFace(object):
 			pool5 = slim.max_pool2d(conv5, [3,3], 2, padding= 'VALID', scope='pool5')
 			
 			shape = int(np.prod(pool5.get_shape()[1:]))
-			fc6 = slim.fully_connected(tf.reshape(conv_all, [-1, shape]), 4096, scope='fc6')
+			fc6 = slim.fully_connected(tf.reshape(pool5, [-1, shape]), 4096, scope='fc6')
 			
 			fc_detection = slim.fully_connected(fc6, 512, scope='fc_det1')
 			out_detection = slim.fully_connected(fc_detection, 2, scope='fc_det2', activation_fn = None)
