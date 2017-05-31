@@ -50,7 +50,7 @@ class HyperFace(object):
 		
 		net_output = self.network_det(self.X) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
 
-		self.loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=net_output[0], labels=tf.one_hot(self.detection, 2)))
+		self.loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=net_output, labels=tf.one_hot(self.detection, 2)))
 
 		# detection_mask = tf.cast(tf.expand_dims(self.detection, axis=1),tf.float32)
 		
@@ -353,7 +353,7 @@ class HyperFace(object):
 			print var.name, ' ', var.get_shape()
 
 
-	def save_weights(self, path, counter):
+	def save_weights(self, path):
 		variables = slim.get_model_variables()
 		weights = {}
 		for var in variables:
