@@ -365,9 +365,9 @@ class HyperFace(object):
 		variables = slim.get_model_variables()
 		weights = np.load(path)
 		for var in variables:
-			if var.name in weights:
+			if var.name in weights.item():
 				print var.name
-				self.sess.run(var.assign(weights[var.name]))
+				self.sess.run(var.assign(weights.item()[var.name]))
 
 
 
