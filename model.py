@@ -14,7 +14,7 @@ class HyperFace(object):
 		self.img_width = 227
 		self.channel = 3
 
-		self.num_epochs = 2
+		self.num_epochs =10 
 
 		# Hyperparameters  1,5,0.5,5,2
 		self.weight_detect = 1      
@@ -43,33 +43,34 @@ class HyperFace(object):
 
 		self.X = tf.placeholder(tf.float32, [self.batch_size, self.img_height, self.img_width, self.channel], name='images')
 		self.detection = tf.placeholder(tf.int32, [self.batch_size], name='detection')
-		# self.landmarks = tf.placeholder(tf.float32, [self.batch_size, 42], name='landmarks')
-		# self.visibility = tf.placeholder(tf.float32, [self.batch_size,21], name='visibility')
-		# self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
-		# self.gender = tf.placeholder(tf.int32, [self.batch_size], name='gender')
+		self.landmarks = tf.placeholder(tf.float32, [self.batch_size, 42], name='landmarks')
+		self.visibility = tf.placeholder(tf.float32, [self.batch_size,21], name='visibility')
+		self.pose = tf.placeholder(tf.float32, [self.batch_size,3], name='pose')
+		self.gender = tf.placeholder(tf.int32, [self.batch_size], name='gender')
 		
-		net_output = self.network_det(self.X) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
+		net_output = self.network(self.X) # (out_detection, out_landmarks, out_visibility, out_pose, out_gender)
+		self.test_model = net_output
+		self.loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=net_output[0], labels=tf.one_hot(self.detection, 2)))
 
-		self.loss_detection = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=net_output, labels=tf.one_hot(self.detection, 2)))
-
-		# detection_mask = tf.cast(tf.expand_dims(self.detection, axis=1),tf.float32)
+		detection_mask = tf.cast(tf.expand_dims(self.detection, axis=1),tf.float32)
 		
-		# visibility_mask = tf.reshape(tf.tile(tf.expand_dims(self.visibility, axis=2), [1,1,2]), [self.batch_size, -1])
-		# self.loss_landmarks = tf.reduce_mean(tf.square(detection_mask*visibility_mask*(net_output[1] - self.landmarks)))
+		visibility_mask = tf.reshape(tf.tile(tf.expand_dims(self.visibility, axis=2), [1,1,2]), [self.batch_size, -1])
+		self.loss_landmarks = tf.reduce_mean(tf.square(detection_mask*visibility_mask*(net_output[1] - self.landmarks)))
 		
-		# self.loss_visibility = tf.reduce_mean(tf.square(detection_mask*(net_output[2] - self.visibility)))
-		# self.loss_pose = tf.reduce_mean(tf.square(detection_mask*(net_output[3] - self.pose)))
-		# self.loss_gender = tf.reduce_mean(detection_mask*tf.nn.sigmoid_cross_entropy_with_logits(logits=net_output[4], labels=tf.one_hot(self.gender,2)))
+		self.loss_visibility = tf.reduce_mean(tf.square(detection_mask*(net_output[2] - self.visibility)))
+		self.loss_pose = tf.reduce_mean(tf.square(detection_mask*(net_output[3] - self.pose)))
+		self.loss_gender = tf.reduce_mean(detection_mask*tf.nn.sigmoid_cross_entropy_with_logits(logits=net_output[4], labels=tf.one_hot(self.gender,2)))
 
 		
-		# self.loss = self.weight_detect*self.loss_detection + self.weight_landmarks*self.loss_landmarks  \
-		# 			+ self.weight_visibility*self.loss_visibility + self.weight_pose*self.loss_pose  \
-		# 			+ self.weight_gender*self.loss_gender
+		self.loss = self.weight_detect*self.loss_detection + self.weight_landmarks*self.loss_landmarks  \
+		 			+ self.weight_visibility*self.loss_visibility + self.weight_pose*self.loss_pose  \
+		 			+ self.weight_gender*self.loss_gender
 
-		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.cast(tf.argmax(net_output,1),tf.int32),self.detection),tf.float32))
+		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.cast(tf.argmax(net_output[0],1),tf.int32),self.detection),tf.float32))
 
-		self.loss = self.loss_detection
-		self.optimizer = tf.train.AdamOptimizer().minimize(self.loss)
+		#self.loss = self.loss_detection
+		#self.optimizer = tf.train.AdamOptimizer(1e-7).minimize(self.loss)
+		self.optimizer = tf.train.MomentumOptimizer(1e-3,0.9,use_nesterov=True).minimize(self.loss)	
 		self.saver = tf.train.Saver(max_to_keep=4, keep_checkpoint_every_n_hours=4)
 		self.best_saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=4)
 
@@ -87,21 +88,21 @@ class HyperFace(object):
 			print "Initializing Model"
 			self.sess.run(tf.group(tf.global_variables_initializer(),tf.local_variables_initializer()))
 			
-		# self.load_det_weights(self.best_model_save_path+'weights_0.npy')
-		
+		#self.load_det_weights(self.restore_model_path+'weights.npy')
+			
 		
 		coord = tf.train.Coordinator()
 		threads = tf.train.start_queue_runners(sess=self.sess,coord=coord)
 
-		writer = tf.summary.FileWriter('./logs', self.sess.graph)
+		writer = tf.summary.FileWriter('../logs', self.sess.graph)
 		loss_summ = tf.summary.scalar('loss', self.loss)
 		img_summ = tf.summary.image('images', self.images, max_outputs=5)
-		# label_summ = tf.summary.histogram('labels', self.detection)
-		# detect_summ = tf.summary.scalar('det_loss', self.loss_detection)
-		# landmarks_summ =  tf.summary.scalar('landmarks_loss', self.loss_landmarks)
-		# vis_summ = tf.summary.scalar('visibility_loss', self.loss_visibility)
-		# pose_summ = tf.summary.scalar('pose_loss', self.loss_pose)
-		# gender_summ = tf.summary.scalar('gender_loss', self.loss_gender)
+		label_summ = tf.summary.histogram('labels', self.detection)
+		detect_summ = tf.summary.scalar('det_loss', self.loss_detection)
+		landmarks_summ =  tf.summary.scalar('landmarks_loss', self.loss_landmarks)
+		vis_summ = tf.summary.scalar('visibility_loss', self.loss_visibility)
+		pose_summ = tf.summary.scalar('pose_loss', self.loss_pose)
+		gender_summ = tf.summary.scalar('gender_loss', self.loss_gender)
 
 		summ_op = tf.summary.merge_all()
 
@@ -111,24 +112,26 @@ class HyperFace(object):
 			while not coord.should_stop():
 				batch_imgs, batch_labels, batch_landmarks, batch_visibility, batch_pose, batch_gender = self.sess.run([self.images,self.labels,self.land, self.vis, self.po, self.gen])
 				batch_imgs = (batch_imgs - 127.5) / 128.0
-				# input_feed={self.X: batch_imgs, self.detection: batch_labels, self.landmarks: batch_landmarks, self.visibility: batch_visibility, self.pose: batch_pose, self.gender: np.squeeze(batch_gender)}
-				input_feed={self.X: batch_imgs, self.detection: batch_labels}
+				input_feed={self.X: batch_imgs, self.detection: batch_labels, self.landmarks: batch_landmarks, self.visibility: batch_visibility, self.pose: batch_pose, self.gender: np.squeeze(batch_gender)}
+				#input_feed={self.X: batch_imgs, self.detection: batch_labels}
 
-				_,loss, summ, accuracy = self.sess.run([self.optimizer, self.loss, summ_op, self.accuracy], input_feed)
+				_,model_op,loss,l_d,l_l,l_v,l_p,l_g, summ, accuracy = self.sess.run([self.optimizer,self.test_model,self.loss,self.loss_detection,
+self.loss_landmarks,self.loss_visibility,self.loss_pose,self.loss_gender, summ_op, self.accuracy], input_feed)
 				
 				writer.add_summary(summ, counter)
 
 				if counter % self.save_after_steps == 0:
-					self.saver.save(self.sess,self.model_save_path+'statefarm_model',global_step=int(counter),write_meta_graph=False)
+					self.saver.save(self.sess,self.model_save_path+'hyperface_model',global_step=int(counter),write_meta_graph=False)
 
 				
 				if loss <= best_loss:
 					best_loss = loss
-					self.best_saver.save(self.sess,self.best_model_save_path+'statefarm_best_model',global_step=int(counter),write_meta_graph=False)
-					self.save_weights(self.best_model_save_path)
+					self.best_saver.save(self.sess,self.best_model_save_path+'hyperface_best_model',global_step=int(counter),write_meta_graph=False)
+					#self.save_weights(self.best_model_save_path)
 					
 				if counter % self.print_after_steps == 0:
-					print "Iteration:{},Loss:{},Accuracy:{}".format(counter,loss,accuracy)
+					print "Iteration:{},Total Loss:{},Detection loss:{},Landmark loss:{},Visbility Loss :{},Pose Loss:{},Gender Loss:{},Accuracy:{}".format(counter,loss,l_d,l_l,l_v,l_p,l_g,accuracy)
+					
 				counter += 1
 
 		except tf.errors.OutOfRangeError:
@@ -213,7 +216,7 @@ class HyperFace(object):
 			fc_gender = slim.fully_connected(fc_full, 512, scope='fc_gender1')
 
 			out_detection = slim.fully_connected(fc_detection, 2, scope='fc_detection2', activation_fn = None)
-			out_landmarks = slim.fully_connected(fc_landmarks, 42, scope='fc_landmarks2', activation_fn = None)
+			out_landmarks = slim.fully_connected(fc_landmarks, 42, scope='fc_landmarks2', activation_fn = None )
 			out_visibility = slim.fully_connected(fc_visibility, 21, scope='fc_visibility2', activation_fn = None)
 			out_pose = slim.fully_connected(fc_pose, 3, scope='fc_pose2', activation_fn = None)
 			out_gender = slim.fully_connected(fc_gender, 2, scope='fc_gender2', activation_fn = None)
