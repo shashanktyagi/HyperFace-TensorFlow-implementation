@@ -1,6 +1,6 @@
 import tensorflow as tf
 import os
-from model import *
+from model_prediction import *
 
 
 

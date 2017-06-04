@@ -206,7 +206,7 @@ self.loss_landmarks,self.loss_visibility,self.loss_pose,self.loss_gender, summ_o
 			conv_all = slim.conv2d(concat_feat, 192, [1,1], 1, padding= 'VALID', scope='conv_all')
 			
 			shape = int(np.prod(conv_all.get_shape()[1:]))
-			fc_full = slim.fully_connected(tf.reshape(conv_all, [-1, shape]), 3072, scope='fc_full')
+			fc_full = slim.fully_connected(tf.reshape(tf.transpose(conv_all, [0,3,1,2]), [-1, shape]), 3072, scope='fc_full')
 
 			fc_detection = slim.fully_connected(fc_full, 512, scope='fc_detection1')
 			fc_landmarks = slim.fully_connected(fc_full, 512, scope='fc_landmarks1')
@@ -239,7 +239,6 @@ self.loss_landmarks,self.loss_visibility,self.loss_pose,self.loss_gender, summ_o
 				print count
 				batch_imgs, batch_labels, batch_landmarks, batch_visibility, batch_pose, batch_gender = self.sess.run([self.images,self.labels,self.land, self.vis, self.po, self.gen])
 				batch_imgs = (batch_imgs - 127.5) / 128.0
-				# input_feed={self.X: batch_imgs, self.detection: batch_labels, self.landmarks: batch_landmarks, self.visibility: batch_visibility, self.pose: batch_pose, self.gender: np.squeeze(batch_gender)}
 				
 				net_preds = self.sess.run(self.net_output, feed_dict={self.X: batch_imgs})
 				result.append(np.concatenate(net_preds, axis=1))
